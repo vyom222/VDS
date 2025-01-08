@@ -73,6 +73,8 @@ def Battery(SoC, voltage):
 def Motor(current, voltage):
     rpm = velocity * 60 / (math.pi * TYRE_DIAMETER) # Eq. 10 in research section 3.2.2
     torque_motor =  (MOTOR_EFFICIENCY * current * voltage * 60) / (rpm * 2*math.pi) # Eq. 9 in research section 3.2.2
+    if torque_motor > 12:
+        torque_motor = 12 # limit to torque according to datasheet
     motor_force = (GEAR_RATIO * TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2) # Force = moment/ distance
     return rpm, motor_force, torque_motor
 
@@ -88,13 +90,13 @@ def Velocity(velocity, acceleration, time_step, distance):
     return velocity, distance
 
 
-for i in range(5):
+for i in range(3600):
     skin_friction,drag,lift = aero(velocity)
     print('skin, drag, lift:', skin_friction,drag,lift)
     F_rr = rolling_resistance(lift)
     print('F_rr:', F_rr)
     current, SoC, voltage = Battery(SoC, voltage)
-    print('SoC, voltage:', SoC, voltage)
+    print('current, SoC, voltage:', current, SoC, voltage)
     rpm, motor_force, torque_motor = Motor(current, voltage)
     print('rpm, motor_force, torque: ', rpm, motor_force, torque_motor)
     resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
