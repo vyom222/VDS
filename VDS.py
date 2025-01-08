@@ -35,14 +35,19 @@ t = 0 # discharge time
 
 rpm = 0
 mot_r = 1 # motor internal resistnace
-TYRE_DIAMETER = 0.3 # metres
+TYRE_DIAMETER = 0.5 # metres
 MOTOR_EFFICIENCY = 0.9
+DIA_MOTOR_GEAR = 1
+DIA_AXLE_GEAR = 1.5
+GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
+TRANSMISSION_EFFICIENCY = 0.9
+DISTANCE_FROM_MOTOR = 0.5
 
 resultant_force = 0
 acceleration = 0
-velocity = 20 # m/s
+velocity = 15 # m/s
 
-def aero():
+def aero(velocity):
     skin_friction = C_S * 0.5 * RHO * velocity ** 2 * CSA # Eq. 21 in research section 3.2.3
     drag = C_D * 0.5 * RHO * velocity ** 2 * CSA # Eq. 22 in research section 3.2.3
     lift = C_L * 0.5 * RHO * velocity ** 2 * CSA # Eq. 23 in research section 3.2.3
@@ -66,16 +71,21 @@ def Battery(SoC, voltage):
 
 def Motor(current, voltage):
     rpm = velocity * 60 / (math.pi * TYRE_DIAMETER) # Eq. 10 in research section 3.2.2
-    torque = (MOTOR_EFFICIENCY * current * voltage * 60) / (rpm * 2*math.pi) # Eq. 9 in research section 3.2.2
-    return rpm, torque
+    torque_motor =  (MOTOR_EFFICIENCY * current * voltage * 60) / (rpm * 2*math.pi) # Eq. 9 in research section 3.2.2
+    motor_force = (GEAR_RATIO * TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2)
+
+    return rpm, motor_force, torque_motor
 
 
 
-
-# skin_friction,drag,lift = aero()
-# print(skin_friction,drag,lift)
-# print(rolling_resistance(lift))
-# for i in range(3600):
-#     current, SoC, voltage = Battery(SoC, voltage)
-#     print(SoC, voltage)
-#     print(Motor(current, voltage))
+for i in range(5):
+    skin_friction,drag,lift = aero(velocity)
+    print(skin_friction,drag,lift)
+    F_rr = rolling_resistance(lift)
+    print(F_rr)
+    current, SoC, voltage = Battery(SoC, voltage)
+    print(SoC, voltage)
+    rpm, motor_force, torque_motor = Motor(current, voltage)
+    print(rpm, motor_force, torque_motor)
+    resultant_force = motor_force - F_rr - skin_friction - drag
+    print(f"Resultant force = {resultant_force}")
