@@ -11,7 +11,7 @@ TOTAL_WEIGHT = CAR_WEIGHT + DRIVER_WEIGHT
 G = 9.81
 
 c_rr = 0 # coeff of rolling resistance
-TYRE_PRESSURE_PSI = 30 # psi
+TYRE_PRESSURE_PSI = 40 # psi
 TYRE_PRESSURE = TYRE_PRESSURE_PSI / 14.504 # convert to bar
 
 C_D = 0.49 # coeff of drag
@@ -45,7 +45,8 @@ DISTANCE_FROM_MOTOR = 0.5
 
 resultant_force = 0
 acceleration = 0
-velocity = 15 # m/s
+u = 0 # inital velocity
+velocity = 0.01 # m/s
 
 def aero(velocity):
     skin_friction = C_S * 0.5 * RHO * velocity ** 2 * CSA # Eq. 21 in research section 3.2.3
@@ -72,20 +73,31 @@ def Battery(SoC, voltage):
 def Motor(current, voltage):
     rpm = velocity * 60 / (math.pi * TYRE_DIAMETER) # Eq. 10 in research section 3.2.2
     torque_motor =  (MOTOR_EFFICIENCY * current * voltage * 60) / (rpm * 2*math.pi) # Eq. 9 in research section 3.2.2
-    motor_force = (GEAR_RATIO * TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2)
-
+    motor_force = (GEAR_RATIO * TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2) # Force = moment/ distance
     return rpm, motor_force, torque_motor
 
+def Acceleration(motor_force, F_rr, skin_friction, drag):
+    resultant_force = motor_force - F_rr - skin_friction - drag
+    acceleration = resultant_force/TOTAL_WEIGHT # F = ma, m per s^2
+    return resultant_force, acceleration
+
+def Velocity(velocity, acceleration, time_step, distance):
+    u = velocity 
+    velocity = velocity + acceleration * time_step # v = u + at
+    distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
+    return velocity, distance
 
 
 for i in range(5):
     skin_friction,drag,lift = aero(velocity)
-    print(skin_friction,drag,lift)
+    print('skin, drag, lift:', skin_friction,drag,lift)
     F_rr = rolling_resistance(lift)
-    print(F_rr)
+    print('F_rr:', F_rr)
     current, SoC, voltage = Battery(SoC, voltage)
-    print(SoC, voltage)
+    print('SoC, voltage:', SoC, voltage)
     rpm, motor_force, torque_motor = Motor(current, voltage)
-    print(rpm, motor_force, torque_motor)
-    resultant_force = motor_force - F_rr - skin_friction - drag
-    print(f"Resultant force = {resultant_force}")
+    print('rpm, motor_force, torque: ', rpm, motor_force, torque_motor)
+    resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
+    print('Resultant, Acceleration:',resultant_force, acceleration)
+    velocity,distance = Velocity(velocity, acceleration, time_step, distance)
+    print('Velocity, distance:', velocity,distance)
