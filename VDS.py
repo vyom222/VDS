@@ -6,7 +6,7 @@ time_step = 1
 distance = 0
 
 CAR_WEIGHT = 40
-DRIVER_WEIGHT = 60
+DRIVER_WEIGHT = 65
 TOTAL_WEIGHT = CAR_WEIGHT + DRIVER_WEIGHT
 G = 9.81
 
@@ -22,7 +22,7 @@ CSA = 0.1535 # cross-sectional area
 WIND_SPEED = 0
 wind_direction = 0 # angle in degrees
 
-V_MAX = 24 # 100% SoC
+V_MAX = 26 # 100% SoC
 V_MIN = 18 # 0% SoC
 SoC = 100 
 voltage = V_MAX 
@@ -83,7 +83,7 @@ def Acceleration(motor_force, F_rr, skin_friction, drag):
     acceleration = resultant_force/TOTAL_WEIGHT # F = ma, m per s^2
     return resultant_force, acceleration
 
-def Velocity(velocity, acceleration, time_step, distance):
+def Velocity_Distance(velocity, acceleration, time_step, distance):
     u = velocity 
     velocity = velocity + acceleration * time_step # v = u + at
     distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
@@ -101,5 +101,5 @@ for i in range(3600):
     print('rpm, motor_force, torque: ', rpm, motor_force, torque_motor)
     resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
     print('Resultant, Acceleration:',resultant_force, acceleration)
-    velocity,distance = Velocity(velocity, acceleration, time_step, distance)
+    velocity,distance = Velocity_Distance(velocity, acceleration, time_step, distance)
     print('Velocity, distance:', velocity,distance)
