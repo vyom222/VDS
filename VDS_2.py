@@ -3,6 +3,8 @@
 # linear power down and then just map that to get current
 
 import math
+import matplotlib.pyplot as plt
+import numpy as np
 
 # Initialise variables
 time = 0
@@ -48,7 +50,7 @@ mot_r = 1 # motor internal resistnace
 TYRE_DIAMETER = 0.5 # metres
 MOTOR_EFFICIENCY = 0.9
 DIA_MOTOR_GEAR = 1
-DIA_AXLE_GEAR = 50
+DIA_AXLE_GEAR = 2
 GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
 TRANSMISSION_EFFICIENCY = 0.9
 DISTANCE_FROM_MOTOR = 0.5
@@ -88,17 +90,7 @@ def Battery(SoC, voltage, P_Battery):
     return current, SoC, voltage, P_Battery 
 
 def Motor(current, voltage, velocity):
-    wheel_rpm = velocity * 60 / (math.pi * TYRE_DIAMETER) # Eq. 10 in research section 3.2.2
-    #divide by gear ratio to get motor rpm
-    rpm = wheel_rpm/GEAR_RATIO
-    torque_motor =  (MOTOR_EFFICIENCY * current * voltage * 60) / (rpm * 2*math.pi) # Eq. 9 in research section 3.2.2
-    if torque_motor*10 > current:
-        torque_motor = current/10 # limit to torque according to datasheet
-    motor_force = GEAR_RATIO * (TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2) # Force = moment/ distance
-    #max motor_force = 
-    P_motor = motor_force * velocity
     '''
-    voltage , current
     look up torque (current/10)
     motor_rpm from graph
     wheel_rpm motor/gear ratio - velocity from here then scale drag
@@ -106,7 +98,14 @@ def Motor(current, voltage, velocity):
     force = wheel_torque/wheel radius
     current = 
     '''
-    return rpm, motor_force, torque_motor, P_motor, wheel_rpm
+    motor_torque = current/10
+    motor_rpm = (-2000/13.5) * motor_torque + 2000
+    wheel_rpm = motor_rpm / GEAR_RATIO
+    wheel_torque = GEAR_RATIO * motor_torque 
+    motor_force = wheel_torque / (TYRE_DIAMETER/2)
+    velocity = wheel_rpm * (math.pi * TYRE_DIAMETER) / 60
+
+    return motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, velocity
 
 def Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr):
     P_resultant = P_Battery - (P_motor + P_Drag + P_SkinF + P_rr)
@@ -123,20 +122,40 @@ def Velocity_Distance(velocity, acceleration, time_step, distance):
     distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
     return velocity, distance
 
-
-for i in range(20):
+times = []
+voltages = []
+motor_rpms = []
+motor_torques = []
+velocities = []
+for i in range(3600):
     skin_friction,drag,lift, P_SkinF, P_Drag, P_Lift = aero(velocity)
     F_rr, P_rr = rolling_resistance(lift, velocity)
     current, SoC, voltage, P_Battery = Battery(SoC, voltage, P_Battery)
-    rpm, motor_force, torque_motor, P_motor, wheel_rpm = Motor(current, voltage, velocity)
-    P_resultant = Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr)
+    motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, velocity= Motor(current, voltage, velocity)
+    # P_resultant = Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr)
     resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
     velocity, distance = Velocity_Distance(velocity, acceleration, time_step, distance)
-
+    time+=time_step
     print(skin_friction,drag,lift,F_rr)
     print(P_SkinF, P_Lift, P_Drag, P_rr)
     print(current, SoC, voltage, P_Battery)
-    print(rpm, motor_force, torque_motor, P_motor, wheel_rpm)
-    print(P_resultant)
+    print(motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, velocity)
+    # print(P_resultant)
     print(resultant_force, acceleration)
     print(velocity, distance)
+    times.append(time)
+    voltages.append(voltage)
+    motor_rpms.append(motor_rpm)
+    motor_torques.append(motor_torque)
+    velocities.append(velocity)
+
+
+plt.plot(times,velocities)
+plt.show()
+plt.plot(times,voltages)
+plt.show()
+plt.plot(times,motor_rpms)
+plt.show()
+plt.plot(times,motor_torques)
+plt.show()
+
