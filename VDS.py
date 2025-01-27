@@ -4,6 +4,7 @@ import math
 time = 0
 time_step = 1
 distance = 0
+session_length = 3600 
 
 CAR_WEIGHT = 40
 DRIVER_WEIGHT = 65
@@ -27,26 +28,31 @@ V_MIN = 18 # 0% SoC
 SoC = 100 
 voltage = V_MAX 
 current = 0 
+MIN_CURRENT = 19.5 # From telemetry data Goodwood finals 2024
+MIN_POWER = MIN_CURRENT * V_MIN  # This is equivalent zero power left
 BAT_R = 0.12 # Battery internal resistance
 H = 20 # Battery Rated Dishcharge time in Hours
 C = 36 # #Battery Rated Capacity at discharge rate in Ah
 K = 1.2 # Estimation for Peukert's constant
 t = 0 # discharge time
+BATTERY_WH = 650 # Watthours of battery as calc by battery dyno
+P_Battery = 650/(session_length/3600) # number of watts available
+POWER_STEP = (BATTERY_WH - MIN_POWER)/3600 # power per second
 
 rpm = 0
 mot_r = 1 # motor internal resistnace
 TYRE_DIAMETER = 0.5 # metres
-MOTOR_EFFICIENCY = 0.9
+MOTOR_EFFICIENCY = 0.7
 DIA_MOTOR_GEAR = 1
 DIA_AXLE_GEAR = 1.5
 GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
-TRANSMISSION_EFFICIENCY = 0.9
+TRANSMISSION_EFFICIENCY = 0.95
 DISTANCE_FROM_MOTOR = 0.5
 
 resultant_force = 0
 acceleration = 0
 u = 0 # inital velocity
-velocity = 0.01 # m/s
+velocity = 10 # m/s
 
 def aero(velocity):
     skin_friction = C_S * 0.5 * RHO * velocity ** 2 * CSA # Eq. 21 in research section 3.2.3
@@ -63,12 +69,13 @@ def rolling_resistance(lift):
     F_rr = c_rr * (TOTAL_WEIGHT * G - lift) # Eq. 26 in research sectino 3.2.4
     return F_rr
 
-def Battery(SoC, voltage):
-    current = voltage / ( mot_r + 2 * BAT_R) # Ohm's Law in research section 3.2.2
+def Battery(SoC, voltage, P_Battery):
+    P_Battery = P_Battery - MIN_POWER/3600
+    current = P_Battery/voltage
     t = H * (C/ current*H) ** K # Peukert's Law Eq. 4 in research section 3.2.1 
     SoC = SoC - SoC * time_step/t
     voltage = V_MIN + (V_MAX - V_MIN) * SoC /100 # Eq. 3 in research section 3.2.1
-    return current, SoC, voltage 
+    return current, SoC, voltage, P_Battery 
 
 def Motor(current, voltage):
     rpm = velocity * 60 / (math.pi * TYRE_DIAMETER) # Eq. 10 in research section 3.2.2
@@ -95,8 +102,8 @@ for i in range(3600):
     print('skin, drag, lift:', skin_friction,drag,lift)
     F_rr = rolling_resistance(lift)
     print('F_rr:', F_rr)
-    current, SoC, voltage = Battery(SoC, voltage)
-    print('current, SoC, voltage:', current, SoC, voltage)
+    current, SoC, voltage, P_Battery = Battery(SoC, voltage, P_Battery)
+    print('current, SoC, voltage:', current, SoC, voltage, P_Battery)
     rpm, motor_force, torque_motor = Motor(current, voltage)
     print('rpm, motor_force, torque: ', rpm, motor_force, torque_motor)
     resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)

@@ -1,10 +1,14 @@
 ### VERSION TO USE POWER AS THE BASE COMPARED TO CURRENT
+# I_min = 19
+# linear power down and then just map that to get current
+
 import math
 
 # Initialise variables
 time = 0
 time_step = 1
 distance = 0
+session_length = 3600 
 
 CAR_WEIGHT = 40
 DRIVER_WEIGHT = 65
@@ -28,18 +32,23 @@ V_MIN = 18 # 0% SoC
 SoC = 100 
 voltage = V_MAX 
 current = 0 
+MIN_CURRENT = 19.5 # From telemetry data Goodwood finals 2024
+MIN_POWER = MIN_CURRENT * V_MIN  # This is equivalent zero power left
 BAT_R = 0.12 # Battery internal resistance
 H = 20 # Battery Rated Dishcharge time in Hours
 C = 36 # #Battery Rated Capacity at discharge rate in Ah
 K = 1.2 # Estimation for Peukert's constant
 t = 0 # discharge time
+BATTERY_WH = 650 # Watthours of battery as calc by battery dyno
+P_Battery = 650/(session_length/3600) # number of watts available
+POWER_STEP = (BATTERY_WH - MIN_POWER)/3600 # power per second
 
 rpm = 0
 mot_r = 1 # motor internal resistnace
 TYRE_DIAMETER = 0.5 # metres
 MOTOR_EFFICIENCY = 0.9
 DIA_MOTOR_GEAR = 1
-DIA_AXLE_GEAR = 1.5
+DIA_AXLE_GEAR = 50
 GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
 TRANSMISSION_EFFICIENCY = 0.9
 DISTANCE_FROM_MOTOR = 0.5
@@ -48,6 +57,7 @@ resultant_force = 0
 acceleration = 0
 u = 0 # inital velocity
 velocity = 10 # m/s
+
 
 def aero(velocity):
     skin_friction = C_S * 0.5 * RHO * velocity ** 2 * CSA # Eq. 21 in research section 3.2.3
@@ -69,11 +79,64 @@ def rolling_resistance(lift, velocity):
     P_rr = F_rr * velocity # Power loss from rr
     return F_rr, P_rr
 
+def Battery(SoC, voltage, P_Battery):
+    P_Battery = P_Battery - MIN_POWER/3600
+    current = P_Battery/voltage
+    t = H * (C/ current*H) ** K # Peukert's Law Eq. 4 in research section 3.2.1 
+    SoC = SoC - SoC * time_step/t
+    voltage = V_MIN + (V_MAX - V_MIN) * SoC /100 # Eq. 3 in research section 3.2.1
+    return current, SoC, voltage, P_Battery 
+
+def Motor(current, voltage, velocity):
+    wheel_rpm = velocity * 60 / (math.pi * TYRE_DIAMETER) # Eq. 10 in research section 3.2.2
+    #divide by gear ratio to get motor rpm
+    rpm = wheel_rpm/GEAR_RATIO
+    torque_motor =  (MOTOR_EFFICIENCY * current * voltage * 60) / (rpm * 2*math.pi) # Eq. 9 in research section 3.2.2
+    if torque_motor*10 > current:
+        torque_motor = current/10 # limit to torque according to datasheet
+    motor_force = GEAR_RATIO * (TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2) # Force = moment/ distance
+    #max motor_force = 
+    P_motor = motor_force * velocity
+    '''
+    voltage , current
+    look up torque (current/10)
+    motor_rpm from graph
+    wheel_rpm motor/gear ratio - velocity from here then scale drag
+    wheel torque - pu_torque times gear ratio
+    force = wheel_torque/wheel radius
+    current = 
+    '''
+    return rpm, motor_force, torque_motor, P_motor, wheel_rpm
+
+def Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr):
+    P_resultant = P_Battery - (P_motor + P_Drag + P_SkinF + P_rr)
+    return P_resultant
+
+def Acceleration(motor_force, F_rr, skin_friction, drag):
+    resultant_force = motor_force - F_rr - skin_friction - drag
+    acceleration = resultant_force/TOTAL_WEIGHT # F = ma, m per s^2
+    return resultant_force, acceleration
+
+def Velocity_Distance(velocity, acceleration, time_step, distance):
+    u = velocity 
+    velocity = velocity + acceleration * time_step # v = u + at
+    distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
+    return velocity, distance
 
 
-skin_friction,drag,lift, P_SkinF, P_Drag, P_Lift = aero(velocity)
-F_rr, P_rr = rolling_resistance(lift, velocity)
+for i in range(20):
+    skin_friction,drag,lift, P_SkinF, P_Drag, P_Lift = aero(velocity)
+    F_rr, P_rr = rolling_resistance(lift, velocity)
+    current, SoC, voltage, P_Battery = Battery(SoC, voltage, P_Battery)
+    rpm, motor_force, torque_motor, P_motor, wheel_rpm = Motor(current, voltage, velocity)
+    P_resultant = Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr)
+    resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
+    velocity, distance = Velocity_Distance(velocity, acceleration, time_step, distance)
 
-# print(skin_friction,drag,lift,F_rr)
-# print(P_SkinF, P_Lift, P_Drag, P_rr)
-
+    print(skin_friction,drag,lift,F_rr)
+    print(P_SkinF, P_Lift, P_Drag, P_rr)
+    print(current, SoC, voltage, P_Battery)
+    print(rpm, motor_force, torque_motor, P_motor, wheel_rpm)
+    print(P_resultant)
+    print(resultant_force, acceleration)
+    print(velocity, distance)
