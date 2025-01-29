@@ -15,8 +15,6 @@ for line in filter(lambda x: len(x.strip()) > 0, f.readlines()):
         datum = json.loads(line.strip())
         if datum["gps_spd"] != None and datum["lat"] != None and datum["long"] != None:
             datum["gps_spd"] *= 1.15078 # Convert from knots to mph
-            datum["p2_I"] /= 10
-            datum["24v_V"] /=1000
             # datum["Wh"]
             #datum["pt_pit"] *= -1 # Pitot values are all negative
             if datum['gps_spd'] > 5: # Data less than 10mph isn't very useful

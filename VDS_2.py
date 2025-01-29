@@ -11,6 +11,7 @@ time = 0
 time_step = 1
 distance = 0
 session_length = 3600 
+moving = True
 
 CAR_WEIGHT = 40
 DRIVER_WEIGHT = 65
@@ -50,7 +51,7 @@ mot_r = 1 # motor internal resistnace
 TYRE_DIAMETER = 0.5 # metres
 MOTOR_EFFICIENCY = 0.9
 DIA_MOTOR_GEAR = 1
-DIA_AXLE_GEAR = 2
+DIA_AXLE_GEAR = 2.55
 GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
 TRANSMISSION_EFFICIENCY = 0.9
 DISTANCE_FROM_MOTOR = 0.5
@@ -58,13 +59,13 @@ DISTANCE_FROM_MOTOR = 0.5
 resultant_force = 0
 acceleration = 0
 u = 0 # inital velocity
-velocity = 10 # m/s
+velocity = 0.1 # m/s
 
 
 def aero(velocity):
-    skin_friction = C_S * 0.5 * RHO * velocity ** 2 * CSA # Eq. 21 in research section 3.2.3
-    drag = C_D * 0.5 * RHO * velocity ** 2 * CSA # Eq. 22 in research section 3.2.3
-    lift = C_L * 0.5 * RHO * velocity ** 2 * CSA # Eq. 23 in research section 3.2.3
+    skin_friction = C_S * 0.5 * RHO * (velocity ** 2) * CSA # Eq. 21 in research section 3.2.3
+    drag = C_D * 0.5 * RHO * (velocity ** 2) * CSA # Eq. 22 in research section 3.2.3
+    lift = C_L * 0.5 * RHO * (velocity ** 2) * CSA # Eq. 23 in research section 3.2.3
 
     P_SkinF = skin_friction * velocity
     P_Drag = drag * velocity
@@ -89,73 +90,87 @@ def Battery(SoC, voltage, P_Battery):
     voltage = V_MIN + (V_MAX - V_MIN) * SoC /100 # Eq. 3 in research section 3.2.1
     return current, SoC, voltage, P_Battery 
 
-def Motor(current, voltage, velocity):
+def Motor(current):
     '''
-    look up torque (current/10)
-    motor_rpm from graph
-    wheel_rpm motor/gear ratio - velocity from here then scale drag
-    wheel torque - pu_torque times gear ratio
-    force = wheel_torque/wheel radius
     current = 
+    resultant speed
+    average
+    max spee
     '''
     motor_torque = current/10
     motor_rpm = (-2000/13.5) * motor_torque + 2000
     wheel_rpm = motor_rpm / GEAR_RATIO
     wheel_torque = GEAR_RATIO * motor_torque 
     motor_force = wheel_torque / (TYRE_DIAMETER/2)
-    velocity = wheel_rpm * (math.pi * TYRE_DIAMETER) / 60
+    max_motor_velocity = wheel_rpm * (math.pi * TYRE_DIAMETER) / 60
+    motor_acceleration = motor_force/ TOTAL_WEIGHT
 
-    return motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, velocity
+    return motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, max_motor_velocity, motor_acceleration
 
 def Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr):
     P_resultant = P_Battery - (P_motor + P_Drag + P_SkinF + P_rr)
     return P_resultant
 
-def Acceleration(motor_force, F_rr, skin_friction, drag):
-    resultant_force = motor_force - F_rr - skin_friction - drag
-    acceleration = resultant_force/TOTAL_WEIGHT # F = ma, m per s^2
-    return resultant_force, acceleration
+def Acceleration(F_rr, skin_friction, drag, motor_acceleration):
+    negative_force = - F_rr - skin_friction - drag
+    negative_acceleration = negative_force/TOTAL_WEIGHT # F = ma, m per s^2
+    acceleration = motor_acceleration + negative_acceleration
+    return negative_force, negative_acceleration, acceleration
 
-def Velocity_Distance(velocity, acceleration, time_step, distance):
+def Velocity_Distance(velocity, acceleration, time_step, distance, max_motor_velocity, moving):
     u = velocity 
-    velocity = velocity + acceleration * time_step # v = u + at
+    velocity = u + acceleration*time_step # v = u + at
+    if velocity > max_motor_velocity:
+        velocity = max_motor_velocity
+    if velocity<0:
+        moving = False
     distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
-    return velocity, distance
+    return velocity, distance, moving
 
 times = []
 voltages = []
 motor_rpms = []
 motor_torques = []
 velocities = []
+currents = []
 for i in range(3600):
+
     skin_friction,drag,lift, P_SkinF, P_Drag, P_Lift = aero(velocity)
     F_rr, P_rr = rolling_resistance(lift, velocity)
     current, SoC, voltage, P_Battery = Battery(SoC, voltage, P_Battery)
-    motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, velocity= Motor(current, voltage, velocity)
+    motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, max_motor_velocity, motor_acceleration = Motor(current)
     # P_resultant = Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr)
-    resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
-    velocity, distance = Velocity_Distance(velocity, acceleration, time_step, distance)
+    negative_force, negative_acceleration, acceleration = Acceleration(F_rr, skin_friction, drag, motor_acceleration)
+    velocity, distance, moving = Velocity_Distance(velocity, acceleration, time_step, distance, max_motor_velocity, moving)
+    
     time+=time_step
-    print(skin_friction,drag,lift,F_rr)
-    print(P_SkinF, P_Lift, P_Drag, P_rr)
-    print(current, SoC, voltage, P_Battery)
-    print(motor_torque, motor_rpm, motor_force, wheel_torque, wheel_rpm, velocity)
+
+    # print(skin_friction,drag,lift,F_rr)
+    # print(P_SkinF, P_Lift, P_Drag, P_rr)
+    print(f"time: {time}")
+    print(f"Current: {current}, SoC: {SoC}, Voltage: {voltage}, P_Battery: {P_Battery}")
+    print(f"Motor torque: {motor_torque}, Motor rpm: {motor_rpm}, Motor force: {motor_force}, Max_velocity: {max_motor_velocity}")
+    print(f"Wheel torque: {wheel_torque}, Wheel rpm: {wheel_rpm}")
     # print(P_resultant)
-    print(resultant_force, acceleration)
-    print(velocity, distance)
+    print(f"Negative force: {negative_force}, Negative acceleration: {negative_acceleration}, Acceleration: {acceleration}")
+    print(f"Velocity: {velocity}, Distance: {distance}")
+
     times.append(time)
     voltages.append(voltage)
     motor_rpms.append(motor_rpm)
     motor_torques.append(motor_torque)
     velocities.append(velocity)
-
-
-plt.plot(times,velocities)
-plt.show()
-plt.plot(times,voltages)
-plt.show()
-plt.plot(times,motor_rpms)
-plt.show()
-plt.plot(times,motor_torques)
-plt.show()
+    currents.append(current)
+    if not moving:
+        break
+# plt.plot(times,currents)
+# plt.show()
+# plt.plot(times,velocities)
+# plt.show()
+# plt.plot(times,voltages)
+# plt.show()
+# plt.plot(times,motor_rpms)
+# plt.show()
+# plt.plot(times,motor_torques)
+# plt.show()
 
