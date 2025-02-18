@@ -1,3 +1,7 @@
+### VERSION TO USE POWER AS THE BASE COMPARED TO CURRENT
+# I_min = 19
+# linear power down and then just map that to get current
+
 import math
 
 # Initialise variables
@@ -42,11 +46,11 @@ POWER_STEP = (BATTERY_WH - MIN_POWER)/3600 # power per second
 rpm = 0
 mot_r = 1 # motor internal resistnace
 TYRE_DIAMETER = 0.5 # metres
-MOTOR_EFFICIENCY = 0.7
+MOTOR_EFFICIENCY = 0.9
 DIA_MOTOR_GEAR = 1
-DIA_AXLE_GEAR = 10
+DIA_AXLE_GEAR = 1
 GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
-TRANSMISSION_EFFICIENCY = 0.95
+TRANSMISSION_EFFICIENCY = 0.9
 DISTANCE_FROM_MOTOR = 0.5
 
 resultant_force = 0
@@ -54,26 +58,32 @@ acceleration = 0
 u = 0 # inital velocity
 velocity = 0.01 # m/s
 
+
 def aero(velocity):
     skin_friction = C_S * 0.5 * RHO * velocity ** 2 * CSA # Eq. 21 in research section 3.2.3
     drag = C_D * 0.5 * RHO * velocity ** 2 * CSA # Eq. 22 in research section 3.2.3
     lift = C_L * 0.5 * RHO * velocity ** 2 * CSA # Eq. 23 in research section 3.2.3
 
-    # wind speed not added yet
-    return skin_friction,drag,lift
+    P_SkinF = skin_friction * velocity
+    P_Drag = drag * velocity
+    P_Lift = lift * velocity
 
-def rolling_resistance(lift):
+    # wind speed not added yet
+    return skin_friction,drag,lift, P_SkinF, P_Drag, P_Lift
+
+def rolling_resistance(lift, velocity):
     # Eq. 28 in research section 3.2.4 and conversion to km/h from m/s
     c_rr = 0.005 + 1 / TYRE_PRESSURE * (0.01 + 0.0095 * (velocity*3.6 /100)**2) 
 
     F_rr = c_rr * (TOTAL_WEIGHT * G - lift) # Eq. 26 in research sectino 3.2.4
-    return F_rr
+    P_rr = F_rr * velocity # Power loss from rr
+    return F_rr, P_rr
 
 def Battery(SoC, voltage, P_Battery):
     P_Battery = P_Battery - MIN_POWER/3600
     current = P_Battery/voltage
     t = H * (C/ current*H) ** K # Peukert's Law Eq. 4 in research section 3.2.1 
-    SoC = SoC - SoC * time_step/(t)
+    SoC = SoC - SoC * time_step/t
     voltage = V_MIN + (V_MAX - V_MIN) * SoC /100 # Eq. 3 in research section 3.2.1
     return current, SoC, voltage, P_Battery 
 
@@ -87,7 +97,20 @@ def Motor(current, voltage, velocity):
     motor_force = GEAR_RATIO * (TRANSMISSION_EFFICIENCY * torque_motor) / (TYRE_DIAMETER/2) # Force = moment/ distance
     #max motor_force = 
     P_motor = motor_force * velocity
+    '''
+    voltage , current
+    look up torque (current/10)
+    motor_rpm from graph
+    wheel_rpm motor/gear ratio - velocity from here then scale drag
+    wheel torque - pu_torque times gear ratio
+    force = wheel_torque/wheel radius
+    current = 
+    '''
     return rpm, motor_force, torque_motor, P_motor, wheel_rpm
+
+def Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr):
+    P_resultant = P_Battery - (P_motor + P_Drag + P_SkinF + P_rr)
+    return P_resultant
 
 def Acceleration(motor_force, F_rr, skin_friction, drag):
     resultant_force = motor_force - F_rr - skin_friction - drag
@@ -101,16 +124,19 @@ def Velocity_Distance(velocity, acceleration, time_step, distance):
     return velocity, distance
 
 
-for i in range(3600):
-    skin_friction,drag,lift = aero(velocity)
-    print('skin, drag, lift:', skin_friction,drag,lift)
-    F_rr = rolling_resistance(lift)
-    print('F_rr:', F_rr)
+for i in range(20):
+    skin_friction,drag,lift, P_SkinF, P_Drag, P_Lift = aero(velocity)
+    F_rr, P_rr = rolling_resistance(lift, velocity)
     current, SoC, voltage, P_Battery = Battery(SoC, voltage, P_Battery)
-    print('current, SoC, voltage:', current, SoC, voltage, P_Battery)
     rpm, motor_force, torque_motor, P_motor, wheel_rpm = Motor(current, voltage, velocity)
-    print('rpm, motor_force, torque: ', rpm, motor_force, torque_motor, P_motor, wheel_rpm)
+    P_resultant = Power(P_motor, P_Battery, P_SkinF, P_Drag, P_rr)
     resultant_force, acceleration = Acceleration(motor_force, F_rr, skin_friction, drag)
-    print('Resultant, Acceleration:',resultant_force, acceleration)
-    velocity,distance = Velocity_Distance(velocity, acceleration, time_step, distance)
-    print('Velocity, distance:', velocity,distance)
+    velocity, distance = Velocity_Distance(velocity, acceleration, time_step, distance)
+
+    print(skin_friction,drag,lift,F_rr)
+    print(P_SkinF, P_Lift, P_Drag, P_rr)
+    print(current, SoC, voltage, P_Battery)
+    print(rpm, motor_force, torque_motor, P_motor, wheel_rpm)
+    print(P_resultant)
+    print(resultant_force, acceleration)
+    print(velocity, distance)
