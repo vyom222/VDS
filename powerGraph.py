@@ -5,6 +5,7 @@ f = open("goodwood2024.txt", "r")
 data = []
 power = []
 times = []
+velocity = []
 time = 0
 
 # Adjust all the data + remove any nulls
@@ -17,6 +18,7 @@ for line in filter(lambda x: len(x.strip()) > 0, f.readlines()):
                 data.append(datum)
                 datum['power'] = datum['p2_I']/1000 * datum['24v_V']/1000
                 power.append(datum['power'])
+                velocity.append(datum['gps_spd'])
                 times.append(time)
                 time +=1
     except Exception as e:
@@ -24,6 +26,9 @@ for line in filter(lambda x: len(x.strip()) > 0, f.readlines()):
 
 plt.plot(times,power)
 plt.show()
+plt.plot(times,velocity)
+plt.show()
+
 
 for p in power:
     print(p)
