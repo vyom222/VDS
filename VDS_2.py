@@ -163,16 +163,21 @@ for i in range(3600):
         break
 
 
-plt.plot(times,currents)
+
+fig, axs = plt.subplots(2, 3)
+axs[0, 0].plot(times,currents)
+axs[0, 0].set_title('Current')
+axs[0, 1].plot(times,velocities, 'tab:orange')
+axs[0, 1].set_title('velocity')
+axs[1, 0].plot(times,voltages, 'tab:green')
+axs[1, 0].set_title('Voltage')
+axs[1, 1].plot(times,socs, 'tab:red')
+axs[1, 1].set_title('SoC')
+axs[0, 2].plot(times,motor_rpms, 'tab:purple')
+axs[0, 2].set_title('Rpm')
+axs[1, 2].plot(times,motor_torques, 'tab:green')
+axs[1, 2].set_title('Motor Torque')
+fig.tight_layout()
+
 plt.show()
-plt.plot(times,velocities)
-plt.show()
-plt.plot(times,voltages)
-plt.show()
-# plt.plot(times,socs)
-# plt.show()
-# plt.plot(times,motor_rpms)
-# plt.show()
-# plt.plot(times,motor_torques)
-# plt.show()
 
