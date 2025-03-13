@@ -11,7 +11,7 @@ distance = 0
 session_length = 3600 
 moving = True
 
-CAR_WEIGHT = 40
+CAR_WEIGHT = 65
 DRIVER_WEIGHT = 65
 TOTAL_WEIGHT = CAR_WEIGHT + DRIVER_WEIGHT
 G = 9.81
@@ -21,7 +21,7 @@ TYRE_PRESSURE_PSI = 40 # psi
 TYRE_PRESSURE = TYRE_PRESSURE_PSI / 14.504 # convert to bar
 
 C_D = 1.07 # coeff of drag
-C_L = -0.066 # coeff of lift
+C_L = 0.89 # coeff of lift
 C_S = 0.011 # coeff of skin friction
 RHO = 1.225 # fluid density
 CSA = 0.1535 # cross-sectional area
@@ -48,7 +48,7 @@ rpm = 0
 mot_r = 1 # motor internal resistnace
 TYRE_DIAMETER = 0.5 # metres
 MOTOR_EFFICIENCY = 0.9
-MOTOR_INITIAL_RESISTANCE = 0.184 #### CHECK THIS
+MOTOR_INITIAL_RESISTANCE = 0.063 #### CHECK THIS
 DIA_MOTOR_GEAR = 1
 DIA_AXLE_GEAR = 2.75
 GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
@@ -104,38 +104,6 @@ def TrackElevation(lap_progress):
         downhill_force = 0
     return lap_progress, downhill_force
 
-########### Find opitmum gear ratio
-
-# Find V_max 
-found = False
-while not found:
-    skin_friction,drag,lift = aero_force(velocity_max)
-    F_rr = rolling_resistance_force(lift, velocity_max)
-    lap_progress, downhill_force = TrackElevation(lap_progress)
-    totalForce = F_rr + skin_friction + drag + downhill_force
-    # print(totalForce)
-    power = totalForce * velocity_max
-    if power<450: # taken from graph - find power and divide by efficiency to get battery power = 650
-        velocity_max += 0.01
-    else:
-        found = True
-print(velocity_max, power)
-
-rpm = 1650 # Power graph
-torque = 2.9 
-
-def Calc_rpm(velocity):
-
-    wheel_rpm = velocity * 60 / (math.pi * TYRE_DIAMETER)
-
-    return wheel_rpm
-
-wheel_rpm = Calc_rpm(velocity_max)
-print(rpm/wheel_rpm, wheel_rpm)
-GEAR_RATIO = rpm/wheel_rpm
-
-##########
-
 def Motor(motor_torque):
     wheel_torque = GEAR_RATIO * motor_torque 
     motor_force = wheel_torque / (TYRE_DIAMETER/2) 
@@ -187,7 +155,7 @@ def Motor(motor_rpm, motor_torque):
     max_motor_velocity = wheel_rpm * (math.pi * TYRE_DIAMETER) / 60 # Max velocity achievable by the car
     return wheel_rpm, wheel_torque, motor_force, max_motor_velocity
 
-def Velocity_Distance(velocity, acceleration, time_step, distance, max_motor_velocity, moving):
+def VelocityDistance(velocity, acceleration, time_step, distance, max_motor_velocity, moving):
     u = velocity 
     velocity = u + acceleration*time_step # v = u + at
     if velocity > max_motor_velocity:
@@ -197,18 +165,7 @@ def Velocity_Distance(velocity, acceleration, time_step, distance, max_motor_vel
     distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
     return velocity, distance, moving
 
-
-for i in range(3600):
-    Battery_power = PowerDegredation(Battery_power, i)
-    motor_temperature = Temperature(motor_temperature)
-    P_max, no_load, T_stall, I_Stall = MotorTemperature(motor_temperature)
-    motor_torque, current, motor_rpm = MotorGraphConversions(Battery_power, P_max, no_load, T_stall, I_Stall)
-    current, SoC, voltage = Battery(SoC, voltage, current, Battery_power)
-    wheel_rpm, wheel_torque, motor_force, max_motor_velocity =  Motor(motor_rpm, motor_torque)
-    voltage = 24
-    print(P_max, no_load, T_stall, I_Stall, voltage)
-    print("thisiiiis", motor_torque, current, motor_rpm)
-
+def MaxSpeed(max_power, velocity, lap_progress):
     found = False
     while not found:
         skin_friction,drag,lift = aero_force(velocity)
@@ -218,30 +175,64 @@ for i in range(3600):
         # print(totalForce)
 
         power = totalForce * velocity
-        if power< Battery_power * 0.7: # taken from graph - find power and divide by efficiency to get battery power = 650
+        if power< max_power: # taken from graph - find power and divide by efficiency to get battery power = 650
             velocity += 0.01
         else:
             found = True
+    return skin_friction,drag,lift, F_rr, lap_progress, downhill_force, totalForce, power, velocity
         
+
+########### Find opitmum gear ratio
+
+# Find V_max 
+# 450 taken from graph - find power and divide by efficiency to get battery power = 650
+skin_friction,drag,lift, F_rr, lap_progress, downhill_force, totalForce, power, velocity_max = MaxSpeed(450,velocity, lap_progress)
+print(velocity_max, power)
+
+rpm = 1650 # Power graph
+torque = 2.9 
+
+def Calc_rpm(velocity):
+
+    wheel_rpm = velocity * 60 / (math.pi * TYRE_DIAMETER)
+
+    return wheel_rpm
+
+wheel_rpm = Calc_rpm(velocity_max)
+print(rpm/wheel_rpm, wheel_rpm)
+GEAR_RATIO = rpm/wheel_rpm
+##########
+
+
+for i in range(session_length):
+    Battery_power = PowerDegredation(Battery_power, i)
+    motor_temperature = Temperature(motor_temperature)
+    P_max, no_load, T_stall, I_Stall = MotorTemperature(motor_temperature)
+    motor_torque, current, motor_rpm = MotorGraphConversions(Battery_power, P_max, no_load, T_stall, I_Stall)
+    current, SoC, voltage = Battery(SoC, voltage, current, Battery_power)
+    wheel_rpm, wheel_torque, motor_force, max_motor_velocity =  Motor(motor_rpm, motor_torque)
+    voltage = 24
+    print(P_max, no_load, T_stall, I_Stall, voltage)
+    print(motor_torque, current, motor_rpm)
+
+    if not moving:
+        break
+
+    skin_friction,drag,lift, F_rr, lap_progress, downhill_force, totalForce, power, velocity = MaxSpeed(Battery_power*0.7,velocity, lap_progress)
         # 22.46 when power< b_power
-        # 17. 5 when power< b_power * 0.7
+        # 17. 5 when power< Battery_power * 0.7
         # 16.91 when totalForce<motor_force
 
     # track progress around to model elevation changes
     lap_progress+=1
     if lap_progress>100:
-        lap_progress =0
+        lap_progress = 0
 
-    # print(Battery_power)
-
-    skin_friction,drag,lift = aero_force(velocity)
-    F_rr = rolling_resistance_force(lift, velocity)
-    lap_progress, downhill_force = TrackElevation(lap_progress)
     resultant_force = motor_force - skin_friction - drag - F_rr - downhill_force
     # print(resultant_force, velocity)
     acceleration = resultant_force / TOTAL_WEIGHT
 
-    velocity, distance, moving = Velocity_Distance(velocity, acceleration, time_step, distance, max_motor_velocity, moving)
+    velocity, distance, moving = VelocityDistance(velocity, acceleration, time_step, distance, max_motor_velocity, moving)
 
     powers.append(Battery_power)
     currents.append(current)
@@ -251,7 +242,7 @@ for i in range(3600):
     velocities.append(velocity)
 
 print(velocity, SoC, distance, acceleration)
-
+print('gear ratio', GEAR_RATIO)
 fig, axs = plt.subplots(2, 2)
 axs[0, 0].plot(times,currents)
 axs[0, 0].set_title('Current')
