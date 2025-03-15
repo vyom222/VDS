@@ -9,7 +9,7 @@ MOTOR_INITIAL_RESISTANCE = 0.184
 
 # Temperatures to sweep (in °C)
 temperatures = [20, 40, 60, 80, 100]
-colors = ['b', 'r', 'g', 'm', 'c']
+colours = ['b', 'r', 'g', 'm', 'c']
 
 def MotorTemperature(temperature):
     """
@@ -59,8 +59,11 @@ def MotorPerformanceArrays(no_load, T_stall, I_stall, num_points=50):
         input_power = i_motor * voltage
         
         # Efficiency (%)
-        eff = 100.0 * (mech_power / input_power) if input_power > 0 else 0
-        
+        if input_power > 0:
+            eff = 100.0 * (mech_power / input_power)
+        else:
+            eff = 0
+
         speed_array[i] = rpm
         current_array[i] = i_motor
         power_array[i] = mech_power
@@ -73,7 +76,7 @@ fig, ax_left = plt.subplots(figsize=(10, 6))
 ax_right = ax_left.twinx()
 
 for i, temp in enumerate(temperatures):
-    color = colors[i]
+    colour = colours[i]
     
     # Get motor parameters for this temperature
     P_max, no_load, T_stall, I_stall = MotorTemperature(temp)
@@ -82,12 +85,12 @@ for i, temp in enumerate(temperatures):
     torque, speed, current, power, eff = MotorPerformanceArrays(no_load, T_stall, I_stall, num_points=50)
     
     # Plot on left y-axis: speed (solid) and power (dashed)
-    ax_left.plot(torque, speed, linestyle='-', color=color, label=f"Speed @ {temp}°C")
-    ax_left.plot(torque, power, linestyle='--', color=color, label=f"Power @ {temp}°C")
+    ax_left.plot(torque, speed, linestyle='-', color=colour, label=f"Speed @ {temp}°C")
+    ax_left.plot(torque, power, linestyle='--', color=colour, label=f"Power @ {temp}°C")
     
     # Plot on right y-axis: current (dash-dot) and efficiency (dotted)
-    ax_right.plot(torque, current, linestyle='-.', color=color, label=f"Current @ {temp}°C")
-    ax_right.plot(torque, eff, linestyle=':', color=color, label=f"Efficiency @ {temp}°C")
+    ax_right.plot(torque, current, linestyle='-.', color=colour, label=f"Current @ {temp}°C")
+    ax_right.plot(torque, eff, linestyle=':', color=colour, label=f"Efficiency @ {temp}°C")
 
 # Set labels and title
 ax_left.set_xlabel("Torque [Nm]")

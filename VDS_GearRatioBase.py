@@ -1,262 +1,295 @@
-# add random subprograms for future proffing, motor temp, mgsin theta
-# Just model battery curve and then don't recalculate it
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Initialise variables
-time = 0
-time_step = 1
-distance = 0
-session_length = 3600 
-moving = True
+# --- Constants and Configurations ---
+# Simulation time settings
+TIME_STEP = 1          # seconds
+SESSION_LENGTH = 3600  # total simulation duration in seconds
 
-CAR_WEIGHT = 65
-DRIVER_WEIGHT = 65
+# Vehicle parameters
+CAR_WEIGHT = 65        # kg
+DRIVER_WEIGHT = 65     # kg
 TOTAL_WEIGHT = CAR_WEIGHT + DRIVER_WEIGHT
-G = 9.81
+G = 9.81               # m/s^2
 
-c_rr = 0 # coeff of rolling resistance
-TYRE_PRESSURE_PSI = 40 # psi
-TYRE_PRESSURE = TYRE_PRESSURE_PSI / 14.504 # convert to bar
+# Aerodynamic parameters
+RHO = 1.225            # Air density (NASA) (kg/m^3)
+CSA = 0.1535           # Cross-sectional area (m^2)
+C_D = 1.07             # Drag coefficient
+C_L = 0.89             # Lift coefficient
+C_S = 0.011            # Skin friction coefficient
 
-C_D = 1.07 # coeff of drag
-C_L = 0.89 # coeff of lift
-C_S = 0.011 # coeff of skin friction
-RHO = 1.225 # fluid density
-CSA = 0.1535 # cross-sectional area
-WIND_SPEED = 0
-wind_direction = 0 # angle in degrees
+# Tyre parameters
+TYRE_PRESSURE_PSI = 40
+TYRE_PRESSURE = TYRE_PRESSURE_PSI / 14.504   # convert psi to bar
+TYRE_DIAMETER = 0.5    # m
 
-V_MAX = 24 # 100% SoC
-V_MIN = 18 # 0% SoC
-SoC = 100 
-voltage = V_MAX 
-current = 0 
-MIN_CURRENT = 19.5 # From telemetry data Goodwood finals 2024
-MIN_POWER = MIN_CURRENT * V_MIN  # This is equivalent zero power left
-BAT_R = 0.12 # Battery internal resistance
-H = 20 # Battery Rated Dishcharge time in Hours
-C = 36 # #Battery Rated Capacity at discharge rate in Ah
-K = 1.2 # Estimation for Peukert's constant
-t = 0 # discharge time
-BATTERY_WH = 1000 # Watthours of battery as calc by battery dyno
-P_Battery = BATTERY_WH/(session_length/3600) # number of watts available
-POWER_STEP = (BATTERY_WH - MIN_POWER)/3600 # power per second
+# Battery parameters
+V_MAX = 24             # Maximum voltage
+V_MIN = 18             # Minimum voltage
+H = 20                 # Rated discharge time in hours
+C_CAP = 36             # Battery capacity in Ah
+K_PEUKERT = 1.2        # Peukert's constant
+BATTERY_WH = 1000      # Battery capacity in Wh
 
-rpm = 0
-mot_r = 1 # motor internal resistnace
-TYRE_DIAMETER = 0.5 # metres
-MOTOR_EFFICIENCY = 0.9
-MOTOR_INITIAL_RESISTANCE = 0.063 #### CHECK THIS
-DIA_MOTOR_GEAR = 1
-DIA_AXLE_GEAR = 2.75
-GEAR_RATIO = DIA_AXLE_GEAR/ DIA_MOTOR_GEAR
-TRANSMISSION_EFFICIENCY = 0.9
-DISTANCE_FROM_MOTOR = 0.5
-
-motor_temperature = 20
+# Motor parameters
+MOTOR_EFFICIENCY = 0.7
+MOTOR_INITIAL_RESISTANCE = 0.063  # Ohms
+NO_LOAD_CURRENT = 0.5
 ORIGINAL_TORQUE_CONSTANT = 0.104
 BACK_EMF_CONSTANT = 1.15
-I_stall = 130
-NO_LOAD_CURRENT = 0.5
+I_STALL_MAX = 130
+RPM_DESIRED = 1650  # Target motor rpm from motor graph
 
-resultant_force = 0
-acceleration = 0
-u = 0 # inital velocity
-velocity = 0 # m/s
+# Initial gear ratio will be calculated later
+# But I could create an override for the future
+DIA_MOTOR_GEAR = 1
+DIA_AXLE_GEAR = 2.75
+# GEAR_RATIO = DIA_AXLE_GEAR / DIA_MOTOR_GEAR
 
-velocity_max = 0
-power = 0
-lap_progress = 0
-downhill_force = 0
+# Each entry is [lap_progress, angle (radians), direction factor]
+ELEVATION_MAP = [
+    [10, 0, 1],
+    [35, math.pi/700, 1],
+    [45, math.pi/800, 1],
+    [70, 0, 1],
+    [100, math.pi/600, -1],
+    [110, math.pi/500, -1],
+    [135, math.pi/550, -1],
+    [160, 0, 1],
+    [200, math.pi/1000, 1],
+    [220, math.pi/1000, -1],
+    [250, math.pi/800, -1],
+    [275, math.pi/750, -1]
+]
 
-Socs = []
-voltages = []
-times = []
-currents = []
-powers = []
-velocities = []
-velocity = 0
-Battery_power = 650
+# --- Functions ---
+def aero_forces(velocity):
+    """
+    Calculate skin friction, drag, and lift.
+    """
+    dynamic_pressure = 0.5 * RHO * velocity**2
+    skin_friction = C_S * dynamic_pressure * CSA # Eq. 21 in research section 3.2.3
+    drag = C_D * dynamic_pressure * CSA # Eq. 22 in research section 3.2.3
+    lift = C_L * dynamic_pressure * CSA # Eq. 23 in research section 3.2.3
+    return skin_friction, drag, lift
 
-def aero_force(velocity):
-    skin_friction = C_S * 0.5 * RHO * (velocity ** 2) * CSA # Eq. 21 in research section 3.2.3
-    drag = C_D * 0.5 * RHO * (velocity ** 2) * CSA # Eq. 22 in research section 3.2.3
-    lift = C_L * 0.5 * RHO * (velocity ** 2) * CSA # Eq. 23 in research section 3.2.3
-
-    return skin_friction,drag,lift
-
-def rolling_resistance_force(lift, velocity):
-    # Eq. 28 in research section 3.2.4 and conversion to km/h from m/s
-    c_rr = 0.005 + 1 / TYRE_PRESSURE * (0.01 + 0.0095 * (velocity*3.6 /100)**2) 
-    F_rr = c_rr * (TOTAL_WEIGHT * G - lift) # Eq. 26 in research sectino 3.2.4
+def rolling_resistance(lift, velocity):
+    """
+    Calculate rolling resistance.
+    """
+    # Eq. 28 in research section 3.2.4
+    c_rr = 0.005 + 1 / TYRE_PRESSURE * (0.01 + 0.0095 * ((velocity * 3.6 / 100) ** 2))
+    F_rr = c_rr * (TOTAL_WEIGHT * G - lift) # Eq. 26 in research section 3.2.4
     return F_rr
 
-elevation_map = [[10,0,1], [35,math.pi/700,1], [45,math.pi/800,1],[70,0,1],[100,math.pi/600,-1],[110,math.pi/500,-1], [135,math.pi/550,-1],
-                 [160,0,1],[200,math.pi/1000,1],[220,math.pi/1000,-1],[250,math.pi/800,-1],[275,math.pi/750,-1]]
-
-def TrackElevation(lap_progress):
+def track_elevation(lap_progress):
+    """
+    Determine the downhill force based on track elevation.
+    """
     pointer = 0
-    while lap_progress>elevation_map[pointer+1][0] and pointer+2<len(elevation_map):
-        pointer+=1
-    downhill_force = TOTAL_WEIGHT*9.81 * math.sin(elevation_map[pointer][1])* elevation_map[pointer+1][2]
-    return lap_progress, downhill_force
+    while lap_progress > ELEVATION_MAP[pointer+1][0] and pointer+2 < len(ELEVATION_MAP):
+        pointer += 1
+    angle = ELEVATION_MAP[pointer][1]
+    direction = ELEVATION_MAP[pointer][2]
+    downhill_force = TOTAL_WEIGHT * G * math.sin(angle) * direction
+    return downhill_force
 
-
-def Battery(SoC, voltage, current, Battery_power, time):
-    t = H * (C/ (current*H)) ** K # Peukert's Law Eq. 4 in research section 3.2.1 
-    SoC = SoC - SoC * time_step/(t*3600)
-    # voltage = V_MIN + (V_MAX - V_MIN) * SoC /100 # Eq. 3 in research section 3.2.1
-    # voltage = Battery_power/current
-    if time<3500:
-        voltage = 18 + 6 * np.exp(-np.log(2) * (time / 3500)**2) 
-    else:
-        A_fixed = -3.84e-6  # Adjusted coefficient for smooth transition
-        B_fixed = -0.00257  # Adjusted linear term for continuity
-        voltage = 21 + B_fixed * (time - 3500) + A_fixed * (time - 3500)**2
-    return current, SoC, voltage 
-
-def MotorGraphConversions(b_power, P_max, no_load, T_stall, I_Stall):
-    b_power = b_power*0.7 #efficiency
-    # b_power = (-motor_torque**2 + motor_torque * T_stall) * P_max / (-(T_stall/2)**2+ (T_stall/2) * T_stall)
-    motor_torque = -1*math.sqrt(-1*((b_power / (P_max / (T_stall/2)**2)) - (T_stall/2)**2)) + T_stall/2
-    # motor_torque = -1*math.sqrt((750-b_power)/(375/22.78)) + 13.5/2 # motor graph quadratic
-    current = motor_torque*I_Stall/T_stall + NO_LOAD_CURRENT # y = mx+c
-    motor_rpm = (-no_load/T_stall) * motor_torque + no_load # y= mx+c
-    return motor_torque, current, motor_rpm
-
-def Temperature(temperature):
-    #increase to 80˚C
-    return temperature + 60/3600
-
-def PowerDegredation(power, time):
-    if time<3000:
-        power= -1/15 *time +700
-    else:
-        power = -0.00056 * time **2 + 3.33 * time -4450  # Random graph I made - on chat
-        # avg 577.22 watts.
-    return power-0.1
-
-def MotorTemperature(temperature):
-    voltage = 24
-    Motor_Resistance= MOTOR_INITIAL_RESISTANCE * (1+0.004*(temperature-20)) # Eq.12
-    I_Stall = voltage/Motor_Resistance
-    Torque_constant = ORIGINAL_TORQUE_CONSTANT * (1-0.0012*(temperature-20))
-    T_stall = I_Stall * Torque_constant
-    no_load = 9.5493 * (voltage- (NO_LOAD_CURRENT * Motor_Resistance)) /Torque_constant 
-    omega = voltage/ Torque_constant 
-    P_max = 0.25 * omega * T_stall
-    return P_max, no_load, T_stall, I_Stall
-
-def Motor(motor_rpm, motor_torque):
+def motor(motor_torque, motor_rpm):
+    """
+    Calculate force at the wheels given a motor torque.
+    """
     wheel_rpm = motor_rpm / GEAR_RATIO
     wheel_torque = GEAR_RATIO * motor_torque 
     motor_force = wheel_torque / (TYRE_DIAMETER/2) # Force = moment/distance
     max_motor_velocity = wheel_rpm * (math.pi * TYRE_DIAMETER) / 60 # Max velocity achievable by the car
     return wheel_rpm, wheel_torque, motor_force, max_motor_velocity
 
-def VelocityDistance(velocity, acceleration, time_step, distance, max_motor_velocity, moving):
-    u = velocity 
-    velocity = u + acceleration*time_step # v = u + at
-    if velocity > max_motor_velocity:
-        velocity = max_motor_velocity
-    if velocity<0:
-        moving = False
-    distance += time_step * (u + velocity)/2 # s = (u+v)/2 * t
-    return velocity, distance, moving
+def calc_motor_temp_changes(temperature):
+    """
+    Recalculate motor graph due to temperature changes.
+    """
+    voltage = 24 # Keep constant for graph
+    motor_resistance = MOTOR_INITIAL_RESISTANCE * (1 + 0.004 * (temperature - 20))
+    I_Stall = voltage / motor_resistance  # simplified stall current estimate
+    torque_constant = ORIGINAL_TORQUE_CONSTANT * (1 - 0.0012 * (temperature - 20))
+    T_stall = I_Stall * torque_constant
+    no_load = 9.5493 * (voltage - (NO_LOAD_CURRENT * motor_resistance)) / torque_constant
+    omega = voltage / torque_constant
+    P_max = 0.25 * omega * T_stall  # rough estimation of maximum power
+    return P_max, no_load, T_stall, I_Stall
 
-def MaxSpeed(max_power, velocity, lap_progress):
-    found = False
-    while not found:
-        skin_friction,drag,lift = aero_force(velocity)
-        F_rr = rolling_resistance_force(lift, velocity)
-        lap_progress, downhill_force = TrackElevation(lap_progress)
-        totalForce = F_rr + skin_friction + drag + downhill_force
-        # print(totalForce)
+def motor_graph_conversion(battery_power, P_max, no_load, T_stall, I_Stall):
+    """
+    Use the motor graph to get the values of key variables.
+    """
+    motor_power = battery_power * 0.7
+    # b_power = (-motor_torque**2 + motor_torque * T_stall) * P_max / (-(T_stall/2)**2+ (T_stall/2) * T_stall)
+    motor_torque = -1 * math.sqrt(-1 * ((motor_power / (P_max / (T_stall/2)**2)) - (T_stall/2)**2)) + T_stall/2
+    # motor_torque = -1*math.sqrt((750-b_power)/(375/22.78)) + 13.5/2 # motor graph quadratic
+    current = motor_torque * I_Stall / T_stall + NO_LOAD_CURRENT
+    motor_rpm = (-no_load / T_stall) * motor_torque + no_load
+    return motor_torque, current, motor_rpm
 
-        power = totalForce * velocity
-        if power< max_power: # taken from graph - find power and divide by efficiency to get battery power = 650
-            velocity += 0.01
-        else:
-            found = True
-    return skin_friction,drag,lift, F_rr, lap_progress, downhill_force, totalForce, power, velocity
-        
+def battery_update(SoC, voltage, current, t):
+    """
+    Update battery SoC and voltage using a Peukert model and voltage discharge curve from the team's battery dyno.
+    """
+    t_discharge = H * (C_CAP / (current * H)) ** K_PEUKERT # Peukert's Law Eq. 4 in research section 3.2.1 
+    SoC -= SoC * TIME_STEP / (t_discharge * 3600)
+    
+    # Voltage model
+    if t < 3500:
+        voltage = 18 + 6 * np.exp(-np.log(2) * (t / 3500) ** 2)
+    else:
+        A = -3.84e-6 # For smooth transition
+        B = -0.00257 # For continuity
+        voltage = 21 + B * (t - 3500) + A * (t - 3500) ** 2
+    return current, SoC, voltage
 
-########### Find opitmum gear ratio
+def temperature_and_cooling(temperature):
+    """
+    Model the changes in motor temperature.
+    More research needs to be done into how the motor temp changes during the race.
+    """
+    return temperature + 60/3600
 
-# Find V_max 
-# 450 taken from graph - find power and divide by efficiency to get battery power = 650
-skin_friction,drag,lift, F_rr, lap_progress, downhill_force, totalForce, power, velocity_max = MaxSpeed(450,velocity, lap_progress)
-print(velocity_max, power)
+def power_degredation(power, time):
+    """
+    Approximated graph for power degredation over time. Modelled as a straight line and then a quadratic.
+    This can be refined in the future.
+    """
+    if time<3000:
+        power= (650/577.22) * (-1/15 *time +700)
+    else:
+        power = (650/577.22) * (-0.00056 * time **2 + 3.33 * time -4450)  # Random graph I made - on chat
+        # avg 577.22 watts.
+    return power
 
-rpm = 1650 # Power graph
-torque = 2.9 
+def update_velocity_distance(velocity, acceleration, distance, max_velocity, moving):
+    """
+    Update vehicle velocity and distance using SUVAT.
+    """
+    u = velocity
+    new_velocity = u + acceleration * TIME_STEP # v = u + at
+    new_velocity = min(new_velocity, max_velocity)
+    if new_velocity < 0:
+        moving  = False  
+        new_velocity = 0
+    distance += TIME_STEP * (u + new_velocity) / 2  # s = (u + v)/2 * t
+    return new_velocity, distance, moving
 
-def Calc_rpm(velocity):
+def find_max_speed(max_power, velocity, lap_progress):
+    """
+    Iteratively determine the maximum achievable speed for the given available power.
+    """
+    while True:
+        skin_friction, drag, lift = aero_forces(velocity)
+        F_rr = rolling_resistance(lift, velocity)
+        downhill_force = track_elevation(lap_progress)
+        total_force = skin_friction + drag + F_rr + downhill_force
+        resistive_power = total_force * velocity
+        if resistive_power >= max_power:  # taken from graph - find power and divide by efficiency to get battery power = 650
+            break
+        velocity += 0.01
+    return skin_friction, drag, lift, F_rr, downhill_force, total_force, resistive_power, velocity   
 
-    wheel_rpm = velocity * 60 / (math.pi * TYRE_DIAMETER)
+# --- Simulation Initialization ---
+time = 0
+distance = 0
+lap_progress = 0
+moving = True
+velocity = 0
+motor_temperature = 20
+SoC = 100
+voltage = V_MAX
+current = 0
+battery_power = BATTERY_WH  # initial battery power available
 
-    return wheel_rpm
+# Lists for storing simulation results
+times = []
+velocities = []
+distances = []
+socs = []
+voltages = []
+currents = []
+powers = []
 
-wheel_rpm = Calc_rpm(velocity_max)
-print(rpm/wheel_rpm, wheel_rpm)
-GEAR_RATIO = rpm/wheel_rpm
-##########
+# ----- Find opitmum gear ratio -----
 
+# Find max spped for a given power. 
+#  450 taken from graph - find power and divide by efficiency to get battery power = 650
+skin_friction, drag, lift, F_rr, downhill_force, total_force, power_req, velocity_max = find_max_speed(450, velocity, lap_progress)
+print("Calculated max speed:", velocity_max, "m/s with power requirement:", power_req)
+wheel_rpm = velocity * 60 / (math.pi * TYRE_DIAMETER)
+gear_ratio = RPM_DESIRED / wheel_rpm
+GEAR_RATIO = gear_ratio
+print("Optimised gear ratio:", GEAR_RATIO)
 
-for i in range(session_length):
-    Battery_power = PowerDegredation(Battery_power, i)
-    motor_temperature = Temperature(motor_temperature)
-    P_max, no_load, T_stall, I_Stall = MotorTemperature(motor_temperature)
-    motor_torque, current, motor_rpm = MotorGraphConversions(Battery_power, P_max, no_load, T_stall, I_Stall)
-    current, SoC, voltage = Battery(SoC, voltage, current, Battery_power, i)
-    wheel_rpm, wheel_torque, motor_force, max_motor_velocity =  Motor(motor_rpm, motor_torque)
-    # voltage = 24
-    print(P_max, no_load, T_stall, I_Stall, voltage)
-    print(motor_torque, current, motor_rpm)
+# --- Main Simulation Loop ---
+for t in range(SESSION_LENGTH):
+        # Update battery power degradation over time
+    battery_power = power_degredation(battery_power, t)
 
+    # Update motor temperature (a cooling algorithm can be added at a later stage)
+    motor_temperature = temperature_and_cooling(motor_temperature)
+
+    # Update motor characteristics graph based on motor temperature
+    P_max, no_load, T_stall, I_Stall = calc_motor_temp_changes(motor_temperature)
+
+    # Use new graph to get key variables
+    motor_torque,current,motor_rpm = motor_graph_conversion(battery_power, P_max, no_load, T_stall, I_Stall)
+
+    # Update battery SoC and voltage
+    current, SoC, voltage = battery_update(SoC, voltage, current, t)
+    
+    # Calculate wheel parameters and forces
+    wheel_rpm, wheel_torque, motor_force, max_motor_velocity = motor(motor_torque, motor_rpm)
+
+    # Determine the maximum speed for available power  
+    skin_friction, drag, lift, F_rr, downhill_force, totalForce, resistive_power, velocity = find_max_speed(battery_power*0.7,velocity, lap_progress)
+
+    # Update lap progress - assume 5 min lap
+    lap_progress = (lap_progress + 1) % 300
+
+    # Calculate net force (motor force minus resistive forces) and acceleration
+    net_force = motor_force - (skin_friction + drag + F_rr + downhill_force)
+    acceleration = net_force / TOTAL_WEIGHT
+
+    # Update vehicle velocity and traveled distance
+    velocity, distance, moving = update_velocity_distance(velocity, acceleration, distance, max_motor_velocity, moving)
+
+    # Log simulation data
+    times.append(t)
+    velocities.append(velocity)
+    distances.append(distance)
+    socs.append(SoC)
+    voltages.append(voltage)
+    currents.append(current)
+    powers.append(battery_power)
+
+    # Break the loop if the car stops
     if not moving:
         break
 
-    skin_friction,drag,lift, F_rr, lap_progress, downhill_force, totalForce, power, velocity = MaxSpeed(Battery_power*0.7,velocity, lap_progress)
-        # 22.46 when power< b_power
-        # 17. 5 when power< Battery_power * 0.7
-        # 16.91 when totalForce<motor_force
+print("Final velocity:", velocity, "m/s")
+print("Final SoC:", SoC)
+print("Total distance traveled:", distance, "m")
+print("Final acceleration:", acceleration, "m/s^2")
+print("Calibrated gear ratio:", GEAR_RATIO)
 
-    # track progress around to model elevation changes
-    lap_progress+=1
-    if lap_progress>300: # 5 min lap
-        lap_progress = 0
-
-    resultant_force = motor_force - skin_friction - drag - F_rr - downhill_force
-    # print(resultant_force, velocity)
-    acceleration = resultant_force / TOTAL_WEIGHT
-
-    velocity, distance, moving = VelocityDistance(velocity, acceleration, time_step, distance, max_motor_velocity, moving)
-
-    powers.append(Battery_power)
-    currents.append(current)
-    Socs.append(SoC)
-    voltages.append(voltage)
-    times.append(i)
-    velocities.append(velocity)
-
-print(motor_torque)
-
-print(velocity, SoC, distance, acceleration)
-print('gear ratio', GEAR_RATIO)
-fig, axs = plt.subplots(2, 3)
-axs[0, 0].plot(times,currents)
-axs[0, 0].set_title('Current')
-axs[0, 1].plot(times,velocities, 'tab:orange')
-axs[0, 1].set_title('Velocity')
-axs[1, 0].plot(times,voltages, 'tab:green')
-axs[1, 0].set_title('Voltage')
-axs[1, 1].plot(times,powers, 'tab:red')
-axs[1, 1].set_title('Power')
-axs[1, 2].plot(times,Socs, 'tab:red')
-axs[1, 2].set_title('SoC')
-fig.tight_layout()
-
+# --- Plotting Results ---
+fig, axs = plt.subplots(2, 3, figsize=(14, 8))
+axs[0, 0].plot(times, currents)
+axs[0, 0].set_title('Current (A)')
+axs[0, 1].plot(times, velocities, 'tab:orange')
+axs[0, 1].set_title('Velocity (m/s)')
+axs[1, 0].plot(times, voltages, 'tab:green')
+axs[1, 0].set_title('Voltage (V)')
+axs[1, 1].plot(times, powers, 'tab:red')
+axs[1, 1].set_title('Battery Power (W)')
+axs[1, 2].plot(times, socs, 'tab:blue')
+axs[1, 2].set_title('State of Charge (%)')
+plt.tight_layout()
 plt.show()
