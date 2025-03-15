@@ -93,28 +93,28 @@ def rolling_resistance_force(lift, velocity):
     F_rr = c_rr * (TOTAL_WEIGHT * G - lift) # Eq. 26 in research sectino 3.2.4
     return F_rr
 
+elevation_map = [[10,0,1], [35,math.pi/700,1], [45,math.pi/800,1],[70,0,1],[100,math.pi/600,-1],[110,math.pi/500,-1], [135,math.pi/550,-1],
+                 [160,0,1],[200,math.pi/1000,1],[220,math.pi/1000,-1],[250,math.pi/800,-1],[275,math.pi/750,-1]]
+
 def TrackElevation(lap_progress):
-    if lap_progress<10:
-        downhill_force = 0
-    elif lap_progress<20:
-        downhill_force = TOTAL_WEIGHT*9.81 * math.sin(math.pi/180)
-    elif lap_progress<25:
-        downhill_force = TOTAL_WEIGHT*9.81 * math.sin(math.pi/180)
-    else:
-        downhill_force = 0
+    pointer = 0
+    while lap_progress>elevation_map[pointer+1][0] and pointer+2<len(elevation_map):
+        pointer+=1
+    downhill_force = TOTAL_WEIGHT*9.81 * math.sin(elevation_map[pointer][1])* elevation_map[pointer+1][2]
     return lap_progress, downhill_force
 
-def Motor(motor_torque):
-    wheel_torque = GEAR_RATIO * motor_torque 
-    motor_force = wheel_torque / (TYRE_DIAMETER/2) 
 
-    return motor_force
-
-def Battery(SoC, voltage, current, Battery_power):
+def Battery(SoC, voltage, current, Battery_power, time):
     t = H * (C/ (current*H)) ** K # Peukert's Law Eq. 4 in research section 3.2.1 
     SoC = SoC - SoC * time_step/(t*3600)
     # voltage = V_MIN + (V_MAX - V_MIN) * SoC /100 # Eq. 3 in research section 3.2.1
-    voltage = Battery_power/current
+    # voltage = Battery_power/current
+    if time<3500:
+        voltage = 18 + 6 * np.exp(-np.log(2) * (time / 3500)**2) 
+    else:
+        A_fixed = -3.84e-6  # Adjusted coefficient for smooth transition
+        B_fixed = -0.00257  # Adjusted linear term for continuity
+        voltage = 21 + B_fixed * (time - 3500) + A_fixed * (time - 3500)**2
     return current, SoC, voltage 
 
 def MotorGraphConversions(b_power, P_max, no_load, T_stall, I_Stall):
@@ -139,6 +139,7 @@ def PowerDegredation(power, time):
     return power-0.1
 
 def MotorTemperature(temperature):
+    voltage = 24
     Motor_Resistance= MOTOR_INITIAL_RESISTANCE * (1+0.004*(temperature-20)) # Eq.12
     I_Stall = voltage/Motor_Resistance
     Torque_constant = ORIGINAL_TORQUE_CONSTANT * (1-0.0012*(temperature-20))
@@ -209,9 +210,9 @@ for i in range(session_length):
     motor_temperature = Temperature(motor_temperature)
     P_max, no_load, T_stall, I_Stall = MotorTemperature(motor_temperature)
     motor_torque, current, motor_rpm = MotorGraphConversions(Battery_power, P_max, no_load, T_stall, I_Stall)
-    current, SoC, voltage = Battery(SoC, voltage, current, Battery_power)
+    current, SoC, voltage = Battery(SoC, voltage, current, Battery_power, i)
     wheel_rpm, wheel_torque, motor_force, max_motor_velocity =  Motor(motor_rpm, motor_torque)
-    voltage = 24
+    # voltage = 24
     print(P_max, no_load, T_stall, I_Stall, voltage)
     print(motor_torque, current, motor_rpm)
 
@@ -225,7 +226,7 @@ for i in range(session_length):
 
     # track progress around to model elevation changes
     lap_progress+=1
-    if lap_progress>100:
+    if lap_progress>300: # 5 min lap
         lap_progress = 0
 
     resultant_force = motor_force - skin_friction - drag - F_rr - downhill_force
@@ -241,9 +242,11 @@ for i in range(session_length):
     times.append(i)
     velocities.append(velocity)
 
+print(motor_torque)
+
 print(velocity, SoC, distance, acceleration)
 print('gear ratio', GEAR_RATIO)
-fig, axs = plt.subplots(2, 2)
+fig, axs = plt.subplots(2, 3)
 axs[0, 0].plot(times,currents)
 axs[0, 0].set_title('Current')
 axs[0, 1].plot(times,velocities, 'tab:orange')
@@ -252,6 +255,8 @@ axs[1, 0].plot(times,voltages, 'tab:green')
 axs[1, 0].set_title('Voltage')
 axs[1, 1].plot(times,powers, 'tab:red')
 axs[1, 1].set_title('Power')
+axs[1, 2].plot(times,Socs, 'tab:red')
+axs[1, 2].set_title('SoC')
 fig.tight_layout()
 
 plt.show()
