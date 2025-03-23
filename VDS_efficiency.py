@@ -59,7 +59,6 @@ ELEVATION_MAP = [
     [135, math.pi/550, -1],
     [160, 0, 1],
     [200, math.pi/1000, 1],
-    [220, math.pi/1000, -1],
     [250, math.pi/800, -1],
     [275, math.pi/750, -1]
 ]
@@ -111,42 +110,60 @@ def calc_motor_temp_changes(temperature):
     Recalculate motor graph due to temperature changes.
     """
     voltage = 24 # Keep constant for graph
+    # Eq 12 in research section 3.2.2
     motor_resistance = MOTOR_INITIAL_RESISTANCE * (1 + 0.004 * (temperature - 20))
-    I_Stall = voltage / motor_resistance  # simplified stall current estimate
+    # Eq 13 in research section 3.2.2    
+    I_Stall = voltage / motor_resistance 
+    # Eq 14 in research section 3.2.2
     torque_constant = ORIGINAL_TORQUE_CONSTANT * (1 - 0.0012 * (temperature - 20))
+    # Eq 15 in research section 3.2.2
     T_stall = I_Stall * torque_constant
+    # Eq 16 in research section 3.2.2
     no_load = 9.5493 * (voltage - (NO_LOAD_CURRENT * motor_resistance)) / torque_constant
+    # Eq 17 in research section 3.2.2
     omega = voltage / torque_constant
-    P_max = 0.25 * omega * T_stall  # rough estimation of maximum power
+    P_max = 0.25 * omega * T_stall  # estimation of maximum power
     return P_max, no_load, T_stall, I_Stall
 
-def motor_graph_conversion(battery_power, P_max, no_load, T_stall, I_Stall):
+def motor_graph_conversion(battery_power, P_max, no_load, T_stall, I_Stall, eff):
     """
     Use the motor graph to get the values of key variables.
     """
-    motor_power = battery_power * 0.7
-    # b_power = (-motor_torque**2 + motor_torque * T_stall) * P_max / (-(T_stall/2)**2+ (T_stall/2) * T_stall)
+    motor_power = battery_power * 0.7 
     motor_torque = -1 * math.sqrt(-1 * ((motor_power / (P_max / (T_stall/2)**2)) - (T_stall/2)**2)) + T_stall/2
-    # motor_torque = -1*math.sqrt((750-b_power)/(375/22.78)) + 13.5/2 # motor graph quadratic
-    current = motor_torque * I_Stall / T_stall + NO_LOAD_CURRENT
+
+    current = motor_torque * ((I_Stall - NO_LOAD_CURRENT )/ T_stall) + NO_LOAD_CURRENT
     motor_rpm = (-no_load / T_stall) * motor_torque + no_load
-    return motor_torque, current, motor_rpm
+
+    mech_power = motor_torque * (motor_rpm * 2.0 * np.pi / 60.0)    
+    if battery_power > 0:
+        eff = mech_power / battery_power
+    else:
+        eff = 0
+
+    return motor_torque, current, motor_rpm, eff
+
+    # b_power = (-motor_torque**2 + motor_torque * T_stall) * P_max / (-(T_stall/2)**2+ (T_stall/2) * T_stall)
+    # motor_torque = -1*math.sqrt((750-b_power)/(375/22.78)) + 13.5/2 # motor graph quadratic
 
 def battery_update(SoC, voltage, current, t, watthours):
     """
     Update battery SoC and voltage using a Peukert model and voltage discharge curve from the team's battery dyno.
     """
     t_discharge = H * (C_CAP / (current * H)) ** K_PEUKERT # Peukert's Law Eq. 4 in research section 3.2.1 
-    SoC = (1 - (watthours / BATTERY_WH)) * 100
+    SoC -= SoC * TIME_STEP / (t_discharge * 3600)
+    
+    # SoC = (1 - (watthours / BATTERY_WH)) * 100
     
     # Voltage model
     if t < 3500:
         voltage = 18 + 6 * np.exp(-np.log(2) * (t / 3500) ** 2)
     else:
-        A = -3.84e-6 # For smooth transition
-        B = -0.00257 # For continuity
+        A = -9.6235e-6 # For smooth transition
+        B = -0.0011883 # For continuity
         voltage = 21 + B * (t - 3500) + A * (t - 3500) ** 2
     return current, SoC, voltage
+
 
 def temperature_and_cooling(temperature):
     """
@@ -155,16 +172,17 @@ def temperature_and_cooling(temperature):
     """
     return temperature + 60/3600
 
-def power_degredation(power, time):
+def power_degradation(power, time):
     """
     Approximated graph for power degredation over time. Modelled as a straight line and then a quadratic.
     This can be refined in the future.
     """
+    # Power model
     if time<3000:
-        power= (650/577.22) * (-1/15 *time +700)
+        power= (BATTERY_WH/571.1) * (-1/15 *time +700)
     else:
-        power = (650/577.22) * (-0.00056 * time **2 + 3.33 * time -4450)  # Random graph I made - on chat
-        # avg 577.22 watts.
+        power = (BATTERY_WH/571.1) * (-0.000444 * (time - 3000) **2 -0.0667 * (time - 3000) + 500) 
+        
     return power
 
 def update_velocity_distance(velocity, acceleration, distance, max_velocity, moving, power, watthours):
@@ -174,7 +192,7 @@ def update_velocity_distance(velocity, acceleration, distance, max_velocity, mov
     u = velocity
     new_velocity = u + acceleration * TIME_STEP # v = u + at
     new_velocity = min(new_velocity, max_velocity)
-    if new_velocity < 0:
+    if new_velocity <= 0:
         moving  = False  
         new_velocity = 0
     distance += TIME_STEP * (u + new_velocity) / 2  # s = (u + v)/2 * t
@@ -191,7 +209,7 @@ def find_max_speed(max_power, velocity, lap_progress):
         elevation_force = track_elevation(lap_progress)
         total_force = skin_friction + drag + F_rr + elevation_force
         resistive_power = total_force * velocity
-        if resistive_power >= max_power:  # taken from graph - find power and divide by efficiency to get battery power = 650
+        if resistive_power >= max_power:  
             break
         velocity += 0.01
     return skin_friction, drag, lift, F_rr, elevation_force, total_force, resistive_power, velocity   
@@ -207,6 +225,7 @@ SoC = 100
 voltage = V_MAX
 current = 0
 watthours = 0
+eff = 0.8
 battery_power = BATTERY_WH  # initial battery power available
 
 # Lists for storing simulation results
@@ -218,13 +237,14 @@ voltages = []
 currents = []
 powers = []
 watthours_log = []
+effs = []
 
 # ----- Find opitmum gear ratio -----
 
 # Find max spped for a given power. 
 #  450 taken from graph - find power and divide by efficiency to get battery power = 650
 skin_friction, drag, lift, F_rr, elevation_force, total_force, power_req, max_velocity = find_max_speed(450, velocity, lap_progress)
-print("Calculated max speed:", max_velocity, "m/s with power requirement:", power_req)
+print("Calculated max speed:", max_velocity, "m/s")
 wheel_rpm =  max_velocity * 60 / (math.pi * TYRE_DIAMETER)
 gear_ratio = RPM_DESIRED / wheel_rpm
 GEAR_RATIO = gear_ratio
@@ -233,7 +253,7 @@ print("Optimised gear ratio:", GEAR_RATIO)
 # --- Main Simulation Loop ---
 for t in range(SESSION_LENGTH):
         # Update battery power degradation over time
-    battery_power = power_degredation(battery_power, t)
+    battery_power = power_degradation(battery_power, t)
 
     # Update motor temperature (a cooling algorithm can be added at a later stage)
     motor_temperature = temperature_and_cooling(motor_temperature)
@@ -242,7 +262,7 @@ for t in range(SESSION_LENGTH):
     P_max, no_load, T_stall, I_Stall = calc_motor_temp_changes(motor_temperature)
 
     # Use new graph to get key variables
-    motor_torque, current, motor_rpm = motor_graph_conversion(battery_power, P_max, no_load, T_stall, I_Stall)
+    motor_torque, current, motor_rpm, eff = motor_graph_conversion(battery_power, P_max, no_load, T_stall, I_Stall, eff)
 
     # Update battery SoC and voltage
     current, SoC, voltage = battery_update(SoC, voltage, current, t, watthours)
@@ -272,6 +292,7 @@ for t in range(SESSION_LENGTH):
     currents.append(current)
     powers.append(battery_power)
     watthours_log.append(watthours)
+    effs.append(eff)
 
     # Break the loop if the car stops
     if not moving:
@@ -282,11 +303,9 @@ print("Final SoC:", SoC)
 print("Total distance traveled:", distance, "m")
 print("Final acceleration:", acceleration, "m/s^2")
 print("Optimised gear ratio:", GEAR_RATIO)
-print(watthours/BATTERY_WH)
-print(watthours, BATTERY_WH)
 
 # --- Plotting Results ---
-fig, axs = plt.subplots(2, 3, figsize=(14, 8))
+fig, axs = plt.subplots(2, 3)
 axs[0, 0].plot(times, currents)
 axs[0, 0].set_title('Current (A)')
 axs[0, 1].plot(times, velocities, 'tab:orange')
@@ -297,7 +316,7 @@ axs[1, 1].plot(times, powers, 'tab:red')
 axs[1, 1].set_title('Battery Power (W)')
 axs[1, 2].plot(times, socs, 'tab:blue')
 axs[1, 2].set_title('State of Charge (%)')
-axs[0, 2].plot(times, watthours_log, 'tab:orange')
-axs[0, 2].set_title('Watthours (Wh)')
+axs[0, 2].plot(times, effs, 'tab:orange')
+axs[0, 2].set_title('efficiency')
 plt.tight_layout()
 plt.show()

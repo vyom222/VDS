@@ -1,13 +1,14 @@
 import matplotlib.pyplot as plt
 import json
 
-f = open("goodwood2025_fp.txt", "r")
+f = open("goodwood2025_r2.txt", "r")
 power = []
 times = []
 velocity = []
 current = []
 voltage = []
 alt = []
+whs = []
 time = 0
 
 # Adjust all the data + remove any nulls
@@ -26,10 +27,11 @@ for line in filter(lambda x: len(x.strip()) > 0, f.readlines()):
                 time +=1
                 current.append(datum['p2_I'])
                 voltage.append(datum['24v_V'])
+                whs.append(datum["Wh"])
     except Exception as e:
         pass
 
-fig, axs = plt.subplots(2, 2)
+fig, axs = plt.subplots(2, 3)
 axs[0, 0].plot(times,current)
 axs[0, 0].set_title('Current')
 axs[0, 1].plot(times,velocity, 'tab:orange')
@@ -37,11 +39,14 @@ axs[0, 1].set_title('Velocity')
 axs[1, 0].plot(times,voltage, 'tab:green')
 axs[1, 0].set_title('Voltage')
 axs[1, 1].plot(times,power, 'tab:red')
-axs[1, 1].set_title('Power')
+axs[1, 1].set_title('power')
+# axs[1, 2].plot(times,alt, 'tab:red')
+# axs[1, 2].set_title('altitude')
+axs[0, 2].plot(times,whs, 'tab:green')
+axs[0, 2].set_title('Watthours')
 fig.tight_layout()
 
 plt.show()
-plt.plot(times, alt)
-plt.show()
+
 # for p in power:
 #     print(p)
